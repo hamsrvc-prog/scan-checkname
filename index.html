@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>สแกนเช็คชื่อเข้าแถว</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Sarabun', 'Noto Sans Thai', Arial, sans-serif;
+    margin: 0;
+    background: #0f172a;
+    color: #1e293b;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; min-height: 100vh; background: #f8fafc; }
+  .topbar {
+    background: #1e3a5f; color: #fff; padding: 14px 16px;
+    text-align: center; position: sticky; top: 0; z-index: 10;
+  }
+  .topbar h1 { font-size: 18px; margin: 0 0 2px; }
+  .topbar .sub { font-size: 13px; opacity: .85; }
+  .tabs { display: flex; background: #fff; border-bottom: 1px solid #e2e8f0; }
+  .tabs button {
+    flex: 1; padding: 12px 4px; border: none; background: none; font-size: 14px;
+    color: #64748b; border-bottom: 3px solid transparent; font-family: inherit;
+  }
+  .tabs button.active { color: #1e3a5f; border-bottom-color: #1e3a5f; font-weight: bold; }
+  .content { padding: 16px; }
+  .card {
+    background: #fff; border-radius: 14px; padding: 16px; margin-bottom: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  .btn {
+    display: block; width: 100%; padding: 14px; border-radius: 12px; border: none;
+    font-size: 16px; font-weight: bold; font-family: inherit; cursor: pointer;
+    text-align: center; text-decoration: none;
+  }
+  .btn-primary { background: #1e3a5f; color: #fff; }
+  .btn-secondary { background: #e2e8f0; color: #1e293b; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #cbd5e1;
+    font-size: 16px; font-family: inherit; margin-bottom: 10px;
+  }
+  .result-overlay {
+    position: fixed; inset: 0; z-index: 50; display: none;
+    align-items: center; justify-content: center; flex-direction: column;
+    color: #fff; text-align: center; padding: 24px;
+  }
+  .result-overlay.show { display: flex; }
+  .result-overlay.ok { background: rgba(22,163,74,.97); }
+  .result-overlay.late { background: rgba(234,88,12,.97); }
+  .result-overlay.dup { background: rgba(100,116,139,.97); }
+  .result-overlay.err { background: rgba(220,38,38,.97); }
+  .result-overlay .icon { font-size: 72px; margin-bottom: 10px; }
+  .result-overlay .name { font-size: 26px; font-weight: bold; margin-bottom: 6px; }
+  .result-overlay .detail { font-size: 16px; opacity: .9; }
+  .student-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 0; border-bottom: 1px solid #eef1f5;
+  }
+  .muted { color: #64748b; font-size: 13px; }
+  #reader { width: 100%; border-radius: 14px; overflow: hidden; }
+  .mode-panel { display: none; }
+  .mode-panel.active { display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>เช็คชื่อเข้าแถวหน้าเสาธง</h1>
+    <div class="sub">หน้าสแกนภายนอก (รองรับกล้องมือถือ)</div>
+  </div>
+
+  <!-- หน้าตั้งค่าครั้งแรก: ใส่ลิงก์เว็บแอป Apps Script -->
+  <div id="setupScreen" class="content" style="display:none;">
+    <div class="card">
+      <p><b>ตั้งค่าครั้งแรก</b></p>
+      <p class="muted">วางลิงก์เว็บแอปของระบบเช็คชื่อ (จากหน้า Admin แท็บ LINE ช่อง "Webhook URL" หรือลิงก์ ?page=admin ที่ใช้อยู่ ตัดส่วน ?page=... ออกให้เหลือแค่ถึง /exec)</p>
+      <input type="text" id="apiUrlInput" placeholder="https://script.google.com/.../exec">
+      <button class="btn btn-primary" onclick="saveApiUrl()">บันทึกและเริ่มใช้งาน</button>
+      <p class="muted" id="setupError" style="color:#dc2626;"></p>
+    </div>
+  </div>
+
+  <div id="mainScreen" style="display:none;">
+    <div class="tabs">
+      <button class="tab-btn active" data-mode="camera">📷 สแกน QR</button>
+      <button class="tab-btn" data-mode="device">🔌 เครื่องสแกน</button>
+      <button class="tab-btn" data-mode="manual">🙋 ลืมบัตร</button>
+    </div>
+
+    <div class="content">
+
+      <div id="mode-camera" class="mode-panel active">
+        <div class="card">
+          <div id="reader"></div>
+          <p class="muted" style="text-align:center;margin-top:10px;">
+            ส่อง QR code บนบัตรนักเรียนให้อยู่ในกรอบกล้อง
+          </p>
+        </div>
+      </div>
+
+      <div id="mode-device" class="mode-panel">
+        <div class="card">
+          <p>ยิงรหัสด้วยเครื่องสแกนบาร์โค้ด/QR แล้วกด Enter อัตโนมัติ</p>
+          <input type="text" id="deviceInput" placeholder="รอรับข้อมูลจากเครื่องสแกน..." autofocus>
+        </div>
+      </div>
+
+      <div id="mode-manual" class="mode-panel">
+        <div class="card">
+          <input type="text" id="searchBox" placeholder="พิมพ์ชื่อหรือชื่อเล่นเพื่อค้นหา...">
+          <div id="studentList"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <button class="btn btn-secondary" onclick="resetApiUrl()" style="font-size:13px;padding:8px;">⚙️ เปลี่ยนลิงก์เว็บแอป</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div id="overlay" class="result-overlay">
+  <div class="icon" id="ovIcon">✅</div>
+  <div class="name" id="ovName"></div>
+  <div class="detail" id="ovDetail"></div>
+  <button id="ovUndoBtn" class="btn btn-secondary" style="display:none;width:auto;padding:10px 20px;margin-top:16px;" onclick="undoLastScan()">↩️ สแกนผิดคน ยกเลิกรายการนี้</button>
+</div>
+
+<script>
+  let roster = [];
+  let html5QrCode = null;
+  let apiUrl = '';
+
+  function getStoredApiUrl() {
+    try { return localStorage.getItem('scanApiUrl') || ''; } catch (e) { return ''; }
+  }
+  function setStoredApiUrl(v) {
+    try { localStorage.setItem('scanApiUrl', v); } catch (e) { /* ไม่มี storage ก็ใช้ได้ แค่ต้องตั้งใหม่ทุกครั้ง */ }
+  }
+
+  function saveApiUrl() {
+    let v = document.getElementById('apiUrlInput').value.trim();
+    if (!v) { document.getElementById('setupError').textContent = 'กรุณาวางลิงก์ก่อน'; return; }
+    v = v.split('?')[0]; // ตัด query string เดิมทิ้ง (เผื่อก็อปมาทั้ง ?page=admin)
+    if (v.indexOf('/exec') === -1) {
+      document.getElementById('setupError').textContent = 'ลิงก์ต้องลงท้ายด้วย /exec (เป็นลิงก์เว็บแอปที่ deploy ไว้)';
+      return;
+    }
+    setStoredApiUrl(v);
+    apiUrl = v;
+    document.getElementById('setupScreen').style.display = 'none';
+    document.getElementById('mainScreen').style.display = 'block';
+    initApp();
+  }
+
+  function resetApiUrl() {
+    if (!confirm('เปลี่ยนลิงก์เว็บแอปใหม่? (ต้องวางลิงก์ใหม่อีกครั้ง)')) return;
+    setStoredApiUrl('');
+    location.reload();
+  }
+
+  function apiCall(action, params) {
+    params = params || {};
+    const qs = Object.keys(params).map(function (k) {
+      return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+    }).join('&');
+    const url = apiUrl + '?action=' + encodeURIComponent(action) + (qs ? '&' + qs : '');
+    return fetch(url).then(function (res) {
+      if (!res.ok) throw new Error('เซิร์ฟเวอร์ตอบกลับผิดพลาด (' + res.status + ')');
+      return res.json();
+    });
+  }
+
+  function initApp() {
+    loadRoster();
+    startCamera();
+  }
+
+  function loadRoster() {
+    apiCall('getRoster').then(function (list) {
+      roster = list;
+      renderStudentList(roster);
+    }).catch(function (err) {
+      document.getElementById('studentList').innerHTML =
+        '<p class="muted" style="color:#dc2626;">โหลดรายชื่อไม่ได้: ' + err.message + '</p>';
+    });
+  }
+
+  function renderStudentList(list) {
+    const box = document.getElementById('studentList');
+    box.innerHTML = '';
+    list.forEach(function (s) {
+      const row = document.createElement('div');
+      row.className = 'student-row';
+      row.innerHTML = '<span>' + (s.nickname === s.name ? s.name : s.nickname + ' <span class="muted">(' + s.name + ')</span>') + '</span>';
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-secondary';
+      btn.style.width = 'auto';
+      btn.style.padding = '8px 14px';
+      btn.textContent = 'เช็คชื่อ';
+      btn.onclick = function () { submitManual(s.code); };
+      row.appendChild(btn);
+      box.appendChild(row);
+    });
+  }
+
+  document.getElementById('searchBox').addEventListener('input', function (e) {
+    const q = e.target.value.trim().toLowerCase();
+    renderStudentList(roster.filter(function (s) {
+      return s.name.toLowerCase().indexOf(q) > -1 || (s.nickname || '').toLowerCase().indexOf(q) > -1;
+    }));
+  });
+
+  let lastScanCode = null;
+  let overlayTimer = null;
+
+  function showOverlay(cls, icon, name, detail, allowUndo, code) {
+    const ov = document.getElementById('overlay');
+    ov.className = 'result-overlay show ' + cls;
+    document.getElementById('ovIcon').textContent = icon;
+    document.getElementById('ovName').textContent = name;
+    document.getElementById('ovDetail').textContent = detail;
+    const undoBtn = document.getElementById('ovUndoBtn');
+    if (allowUndo) {
+      lastScanCode = code;
+      undoBtn.style.display = 'block';
+    } else {
+      undoBtn.style.display = 'none';
+    }
+    beep(cls);
+    if (overlayTimer) clearTimeout(overlayTimer);
+    overlayTimer = setTimeout(function () { ov.className = 'result-overlay'; }, allowUndo ? 5000 : 2200);
+  }
+
+  function undoLastScan() {
+    if (!lastScanCode) return;
+    const code = lastScanCode;
+    lastScanCode = null;
+    document.getElementById('overlay').className = 'result-overlay';
+    apiCall('undoTodayAttendance', { code: code }).then(function (res) {
+      showOverlay(res.ok ? 'dup' : 'err', res.ok ? '↩️' : '❌', res.ok ? 'ยกเลิกแล้ว' : 'ยกเลิกไม่สำเร็จ', res.message, false);
+    }).catch(function (err) {
+      showOverlay('err', '❌', 'ยกเลิกไม่สำเร็จ', err.message, false);
+    });
+  }
+
+  function beep(cls) {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = cls === 'err' ? 220 : (cls === 'late' ? 330 : 660);
+      g.gain.value = 0.15;
+      o.start();
+      setTimeout(function () { o.stop(); ctx.close(); }, 180);
+    } catch (e) { /* เบราว์เซอร์บางตัวอาจไม่รองรับ ไม่ต้องทำอะไร */ }
+  }
+
+  function handleResult(res) {
+    if (res.status === 'ok') {
+      const icon = res.attendanceStatus === 'สาย' ? '⏰' : '✅';
+      const cls = res.attendanceStatus === 'สาย' ? 'late' : 'ok';
+      const extra = res.manual ? ' (เช็คด้วยมือ)' : '';
+      showOverlay(cls, icon, res.nickname, res.attendanceStatus + ' เวลา ' + res.time + ' น.' + extra, true, res.code);
+    } else if (res.status === 'duplicate') {
+      showOverlay('dup', 'ℹ️', res.nickname, res.message, false);
+    } else {
+      showOverlay('err', '❌', 'ไม่สำเร็จ', res.message || 'เกิดข้อผิดพลาด', false);
+    }
+  }
+
+  function submitCode(code) {
+    apiCall('recordAttendance', { code: code }).then(handleResult).catch(function (err) {
+      showOverlay('err', '❌', 'ไม่สำเร็จ', err.message);
+    });
+  }
+  function submitManual(code) {
+    apiCall('recordAttendanceManual', { code: code }).then(handleResult).catch(function (err) {
+      showOverlay('err', '❌', 'ไม่สำเร็จ', err.message);
+    });
+  }
+
+  // ---- โหมดกล้อง ----
+  function startCamera() {
+    if (html5QrCode) return;
+    html5QrCode = new Html5Qrcode('reader');
+    html5QrCode.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: 230 },
+      function (decodedText) { submitCode(decodedText.trim()); },
+      function () { /* ignore scan-frame errors */ }
+    ).catch(function (err) {
+      document.getElementById('reader').innerHTML =
+        '<p class="muted">เปิดกล้องไม่ได้: ' + err + '</p>';
+    });
+  }
+  function stopCamera() {
+    if (html5QrCode) {
+      html5QrCode.stop().then(function () { html5QrCode.clear(); html5QrCode = null; }).catch(function () {});
+    }
+  }
+
+  // ---- โหมดเครื่องสแกน ----
+  const deviceInput = document.getElementById('deviceInput');
+  deviceInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      const v = deviceInput.value.trim();
+      deviceInput.value = '';
+      if (v) submitCode(v);
+    }
+  });
+
+  // ---- สลับโหมด ----
+  document.querySelectorAll('.tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      document.querySelectorAll('.mode-panel').forEach(function (p) { p.classList.remove('active'); });
+      const mode = btn.dataset.mode;
+      document.getElementById('mode-' + mode).classList.add('active');
+      if (mode === 'camera') { startCamera(); } else { stopCamera(); }
+      if (mode === 'device') { setTimeout(function () { deviceInput.focus(); }, 100); }
+    });
+  });
+
+  // ---- เริ่มทำงาน ----
+  (function () {
+    const stored = getStoredApiUrl();
+    if (stored) {
+      apiUrl = stored;
+      document.getElementById('mainScreen').style.display = 'block';
+      initApp();
+    } else {
+      document.getElementById('setupScreen').style.display = 'block';
+    }
+  })();
+</script>
+</body>
+</html>
